@@ -66,8 +66,10 @@ class RDSInstance:
 
     def take_snapshot(self) -> RDSSnapshot:
         snapshot_id = f"{self.instance_id}-{MIGRATION_SEED}-migration"
+        self.logger.info('Taking snapshot "%s" for instance "%s" ...', snapshot_id, self.instance_id)
         snapshot = RDSSnapshot.from_id(snapshot_id)
         if snapshot is not None:
+            self.logger.info('Snapshot "%s" already exists, skipping...', snapshot_id)
             return snapshot
 
         response = self.aws_client.create_db_snapshot(
@@ -75,24 +77,36 @@ class RDSInstance:
             DBInstanceIdentifier=self.instance_id,
             Tags=self.tags,
         )["DBSnapshot"]
+        self.logger.info('Snapshot "%s" created', snapshot_id)
         return RDSSnapshot.from_id(snapshot_id=response["DBSnapshotIdentifier"])
 
     def set_parameter_group(self, parameter_group: ParameterGroup) -> "RDSInstance":
+        self.logger.info(
+            'Setting "%s" parameter group for "%s" instance...',
+            self.instance_id,
+            parameter_group.name,
+        )
         self.aws_client.modify_db_instance(
             DBInstanceIdentifier=self.instance_id,
             DBParameterGroupName=parameter_group.name,
             ApplyImmediately=True,
         )
         self.parameter_group = parameter_group
+        self.logger.info(
+            'Parameter group "%s" set for "%s" instance',
+            parameter_group.name,
+            self.instance_id,
+        )
         return self
 
     def wait_until_available(self, timeout: int = 60 * 60, pooling_frequency: int = 30) -> "RDSInstance":
         timeout_dt = datetime.now(tz=UTC) + timedelta(seconds=timeout)
+        self.logger.info('Waiting for instance "%s" to become available ...', self.instance_id)
 
         while datetime.now(tz=UTC) < timeout_dt:
             status = self.get_status()
-            self.logger.info("[wait_until_available] Instance: %s status: %s", self.instance_id, status)
             if status == "available":
+                self.logger.info('Instance "%s" is available', self.instance_id)
                 return self
             time.sleep(pooling_frequency)
 

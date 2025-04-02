@@ -50,6 +50,7 @@ class BaseEndpoint(abc.ABC):
             },
             Tags=self.rds_instance.tags,
         )
+        self.logger.info('%s endpoint "%s" created', self.endpoint_type.capitalize(), self.endpoint_id)
         self._arn = response["Endpoint"]["EndpointArn"]
         return self
 
@@ -70,17 +71,23 @@ class BaseEndpoint(abc.ABC):
         return self
 
     def get_or_create_endpoint(self) -> "BaseEndpoint":
+        self.logger.info(
+            'Creating %s endpoint "%s" for "%s" database', self.endpoint_type, self.endpoint_id, self.database
+        )
         endpoint = self.get_endpoint()
         if endpoint is not None:
+            self.logger.info('Endpoint "%s" already exists', self.endpoint_id)
             return endpoint
         return self.create_endpoint()
 
     def wait_until_created(self, timeout: int = 60 * 60, pooling_frequency: int = 30) -> "BaseEndpoint":
         timeout_dt = datetime.now(tz=UTC) + timedelta(seconds=timeout)
+        self.logger.info('Waiting for %s endpoint "%s" to become available ...', self.endpoint_type, self.endpoint_id)
 
         while datetime.now(tz=UTC) < timeout_dt:
             status = self.get_status()
             if status == "active":
+                self.logger.info('Endpoint "%s" is active', self.endpoint_id)
                 return self
             self.logger.debug("Endpoint %s is in status %s, waiting...", self.endpoint_id, status)
             time.sleep(pooling_frequency)

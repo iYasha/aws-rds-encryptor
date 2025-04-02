@@ -16,19 +16,26 @@ class MigrationTaskManager:
 
     def run_task(self, task: "MigrationTask"):
         try:
+            self.logger.info('Starting database migration task "%s" ...', task.task_id)
             task.wait_until_finished()
+            self.logger.info('Database migration task "%s" finished successfully', task.task_id)
         except TaskFailedException as e:
             self.errors.append(e)
             self.logger.error(
-                "[Task %s] Status=%s; Stopped reason=%s; Last failure message=%s",
-                e.task.task_id,
+                'Database migration task "%s" with status %s because "%s" with last failure message "%s"',
+                task.task_id,
                 e.status,
                 e.stop_reason,
                 e.last_failure_message,
             )
         except TimeoutError as e:
             self.errors.append(e)
-            self.logger.error("[Task %s] Timeout error: %s", task.task_id, e)
+            self.logger.error(
+                "[Task %s] Timeout error: %s. "
+                "Task might be still running, if so, please increase timeout and try again.",
+                task.task_id,
+                e,
+            )
 
     def run_all(self) -> bool:
         self.errors = []
@@ -39,5 +46,5 @@ class MigrationTaskManager:
             threads.append(thread)
         for thread in threads:
             thread.join()
-        self.logger.info("Migration tasks finished")
+
         return not self.errors

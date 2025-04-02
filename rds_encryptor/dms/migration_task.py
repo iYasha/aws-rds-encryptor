@@ -202,6 +202,7 @@ class MigrationTask:
         while datetime.now(tz=UTC) < timeout_dt:
             status = self.get_status()
             if status == expected_status:
+                self.logger.info("Task %s is in status %s", self.task_id, status)
                 return self
             self.logger.debug("Task %s is in status %s, waiting...", self.task_id, status)
             time.sleep(pooling_frequency)
@@ -209,6 +210,7 @@ class MigrationTask:
         raise TimeoutError(f"Task {self.task_id} status is not {expected_status} after {timeout} seconds")
 
     def wait_until_ready(self) -> "MigrationTask":
+        self.logger.info("Waiting for task %s to be ready ...", self.task_id)
         return self._wait_until(ReplicationTaskStatus.READY)
 
     def wait_until_finished(self, timeout: int = 4 * 60 * 60, pooling_frequency: int = 2 * 60) -> "MigrationTask":
@@ -262,8 +264,19 @@ class MigrationTask:
                 for idx, rule in enumerate(table_mappings)
             ]
         }
+        normalized_id = normalize_aws_id(name)
+        cls.logger.info(
+            'Creating migration task "%s" from "%s" to "%s" '
+            'with migration type "%s" and table mappings "%s" on replication instance "%s" ...',
+            normalized_id,
+            source_endpoint.endpoint_id,
+            target_endpoint.endpoint_id,
+            str(migration_type),
+            str(table_mappings),
+            replication_instance.arn,
+        )
         response = cls.aws_client.create_replication_task(
-            ReplicationTaskIdentifier=normalize_aws_id(name),
+            ReplicationTaskIdentifier=normalized_id,
             SourceEndpointArn=source_endpoint.arn,
             TargetEndpointArn=target_endpoint.arn,
             ReplicationInstanceArn=replication_instance.arn,
@@ -272,4 +285,5 @@ class MigrationTask:
             ReplicationTaskSettings=DEFAULT_REPLICATE_TASK_SETTINGS_JSON,
             Tags=tags or [],
         )["ReplicationTask"]
+        cls.logger.info('Migration task "%s" created', normalized_id)
         return cls(task_id=response["ReplicationTaskIdentifier"])

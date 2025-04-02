@@ -2,7 +2,7 @@ from typing import Optional
 
 import boto3
 
-from rds_encryptor.utils import MIGRATION_SEED
+from rds_encryptor.utils import MIGRATION_SEED, get_logger
 
 
 def build_shared_preload_libraries_param(*libraries: str) -> str:
@@ -15,6 +15,7 @@ def get_migration_parameter_group_name(parameter_group_name: str) -> str:
 
 class ParameterGroup:
     aws_client = boto3.client("rds")
+    logger = get_logger("ParameterGroup")
 
     def __init__(self, name: str):
         self.name = name
@@ -35,11 +36,14 @@ class ParameterGroup:
         return cls(name=name)
 
     def copy(self) -> "ParameterGroup":
+        new_parameter_group_name = get_migration_parameter_group_name(self.name)
+        self.logger.info('Copying parameter group "%s" to "%s" ...', self.name, new_parameter_group_name)
         response = self.aws_client.copy_db_parameter_group(
             SourceDBParameterGroupIdentifier=self.name,
-            TargetDBParameterGroupIdentifier=get_migration_parameter_group_name(self.name),
+            TargetDBParameterGroupIdentifier=new_parameter_group_name,
             TargetDBParameterGroupDescription=f"{self.name} migration parameter group",
         )
+        self.logger.info('Parameter group "%s" copied', new_parameter_group_name)
         return ParameterGroup(name=response["DBParameterGroup"]["DBParameterGroupName"])
 
     def _fetch_properties(self):

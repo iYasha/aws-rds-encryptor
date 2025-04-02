@@ -53,8 +53,10 @@ class RDSSnapshot:
         copy_tags: bool = True,
     ) -> "RDSSnapshot":
         target_snapshot_id = f"{self.snapshot_id}-encrypted"
+        self.logger.info('Copying and encrypting snapshot "%s" to "%s" ...', self.snapshot_id, target_snapshot_id)
         target_snapshot = self.from_id(snapshot_id=target_snapshot_id)
         if target_snapshot is not None:
+            self.logger.info('Snapshot "%s" already exists', target_snapshot_id)
             return target_snapshot
 
         response = self.aws_client.copy_db_snapshot(
@@ -65,15 +67,17 @@ class RDSSnapshot:
             CopyTags=copy_tags,
             Tags=self.tags,
         )
+        self.logger.info('Snapshot "%s" is being copied', target_snapshot_id)
         return RDSSnapshot.from_id(response["DBSnapshot"]["DBSnapshotIdentifier"])
 
     def wait_until_created(self, timeout: int = 60 * 60, pooling_frequency: int = 30) -> "RDSSnapshot":
+        self.logger.info('Waiting for snapshot "%s" to become available ...', self.snapshot_id)
         timeout_dt = datetime.now(tz=UTC) + timedelta(seconds=timeout)
 
         while datetime.now(tz=UTC) < timeout_dt:
             status = self.get_status()
-            self.logger.info("[wait_until_created] Snapshot: %s status: %s", self.snapshot_id, status)
             if status == "available":
+                self.logger.info('Snapshot "%s" is available', self.snapshot_id)
                 return self
             if status == "failed":
                 raise ValueError(f"Snapshot {self.snapshot_id} creation failed")
@@ -85,9 +89,11 @@ class RDSSnapshot:
         from rds_encryptor.rds.instance import RDSInstance
 
         tags = tags or []
+        self.logger.info('Restoring snapshot "%s" to instance "%s" ...', self.snapshot_id, instance_identifier)
         response = self.aws_client.restore_db_instance_from_db_snapshot(
             DBInstanceIdentifier=instance_identifier,
             DBSnapshotIdentifier=self.snapshot_id,
             Tags=tags,
         )
+        self.logger.info('Instance "%s" is being restored', instance_identifier)
         return RDSInstance.from_id(instance_id=response["DBInstance"]["DBInstanceIdentifier"])
