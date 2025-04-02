@@ -1,3 +1,0 @@
-import os
-
-RDS_DEFAULT_KMS_KEY_ARN = os.getenv('RDS_DEFAULT_KMS_KEY_ARN')

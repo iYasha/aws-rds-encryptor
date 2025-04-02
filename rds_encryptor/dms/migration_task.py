@@ -1,13 +1,15 @@
 import json
 import time
-from datetime import datetime, UTC, timedelta
-from typing import NamedTuple, Literal
+from datetime import UTC, datetime, timedelta
+from typing import Literal, NamedTuple
+
 import boto3
 
-from src.dms.endpoints import SourceEndpoint, TargetEndpoint
-from src.dms.enums import MigrationType, ReplicationTaskStatus
-from src.dms.replication_instance import ReplicationInstance
-from src.utils import normalize_aws_id, get_logger
+from rds_encryptor.dms.endpoints import SourceEndpoint, TargetEndpoint
+from rds_encryptor.dms.enums import MigrationType, ReplicationTaskStatus
+from rds_encryptor.dms.replication_instance import ReplicationInstance
+from rds_encryptor.utils import get_logger, normalize_aws_id
+
 
 class TaskFailedException(Exception):
     def __init__(self, task, status, stop_reason, last_failure_message):
@@ -16,95 +18,43 @@ class TaskFailedException(Exception):
         self.stop_reason = stop_reason
         self.last_failure_message = last_failure_message
 
-TableMapping = NamedTuple('TableMapping', [('schema', Literal['%'] | str), ('table', Literal['%'] | str), ('action', Literal['include', 'exclude'])])
+
+class TableMapping(NamedTuple):
+    schema: Literal["%"] | str
+    table: Literal["%"] | str
+    action: Literal["include", "exclude"]
+
 
 DEFAULT_REPLICATE_TASK_SETTINGS = {
     "Logging": {
         "EnableLogging": True,
         "EnableLogContext": True,
         "LogComponents": [
-            {
-                "Severity": "LOGGER_SEVERITY_DEFAULT",
-                "Id": "TRANSFORMATION"
-            },
-            {
-                "Severity": "LOGGER_SEVERITY_DEFAULT",
-                "Id": "SOURCE_UNLOAD"
-            },
-            {
-                "Severity": "LOGGER_SEVERITY_DEFAULT",
-                "Id": "IO"
-            },
-            {
-                "Severity": "LOGGER_SEVERITY_DEFAULT",
-                "Id": "TARGET_LOAD"
-            },
-            {
-                "Severity": "LOGGER_SEVERITY_DEFAULT",
-                "Id": "PERFORMANCE"
-            },
-            {
-                "Severity": "LOGGER_SEVERITY_DEFAULT",
-                "Id": "SOURCE_CAPTURE"
-            },
-            {
-                "Severity": "LOGGER_SEVERITY_DEFAULT",
-                "Id": "SORTER"
-            },
-            {
-                "Severity": "LOGGER_SEVERITY_DEFAULT",
-                "Id": "REST_SERVER"
-            },
-            {
-                "Severity": "LOGGER_SEVERITY_DEFAULT",
-                "Id": "VALIDATOR_EXT"
-            },
-            {
-                "Severity": "LOGGER_SEVERITY_DEFAULT",
-                "Id": "TARGET_APPLY"
-            },
-            {
-                "Severity": "LOGGER_SEVERITY_DEFAULT",
-                "Id": "TASK_MANAGER"
-            },
-            {
-                "Severity": "LOGGER_SEVERITY_DEFAULT",
-                "Id": "TABLES_MANAGER"
-            },
-            {
-                "Severity": "LOGGER_SEVERITY_DEFAULT",
-                "Id": "METADATA_MANAGER"
-            },
-            {
-                "Severity": "LOGGER_SEVERITY_DEFAULT",
-                "Id": "FILE_FACTORY"
-            },
-            {
-                "Severity": "LOGGER_SEVERITY_DEFAULT",
-                "Id": "COMMON"
-            },
-            {
-                "Severity": "LOGGER_SEVERITY_DEFAULT",
-                "Id": "ADDONS"
-            },
-            {
-                "Severity": "LOGGER_SEVERITY_DEFAULT",
-                "Id": "DATA_STRUCTURE"
-            },
-            {
-                "Severity": "LOGGER_SEVERITY_DEFAULT",
-                "Id": "COMMUNICATION"
-            },
-            {
-                "Severity": "LOGGER_SEVERITY_DEFAULT",
-                "Id": "FILE_TRANSFER"
-            }
+            {"Severity": "LOGGER_SEVERITY_DEFAULT", "Id": "TRANSFORMATION"},
+            {"Severity": "LOGGER_SEVERITY_DEFAULT", "Id": "SOURCE_UNLOAD"},
+            {"Severity": "LOGGER_SEVERITY_DEFAULT", "Id": "IO"},
+            {"Severity": "LOGGER_SEVERITY_DEFAULT", "Id": "TARGET_LOAD"},
+            {"Severity": "LOGGER_SEVERITY_DEFAULT", "Id": "PERFORMANCE"},
+            {"Severity": "LOGGER_SEVERITY_DEFAULT", "Id": "SOURCE_CAPTURE"},
+            {"Severity": "LOGGER_SEVERITY_DEFAULT", "Id": "SORTER"},
+            {"Severity": "LOGGER_SEVERITY_DEFAULT", "Id": "REST_SERVER"},
+            {"Severity": "LOGGER_SEVERITY_DEFAULT", "Id": "VALIDATOR_EXT"},
+            {"Severity": "LOGGER_SEVERITY_DEFAULT", "Id": "TARGET_APPLY"},
+            {"Severity": "LOGGER_SEVERITY_DEFAULT", "Id": "TASK_MANAGER"},
+            {"Severity": "LOGGER_SEVERITY_DEFAULT", "Id": "TABLES_MANAGER"},
+            {"Severity": "LOGGER_SEVERITY_DEFAULT", "Id": "METADATA_MANAGER"},
+            {"Severity": "LOGGER_SEVERITY_DEFAULT", "Id": "FILE_FACTORY"},
+            {"Severity": "LOGGER_SEVERITY_DEFAULT", "Id": "COMMON"},
+            {"Severity": "LOGGER_SEVERITY_DEFAULT", "Id": "ADDONS"},
+            {"Severity": "LOGGER_SEVERITY_DEFAULT", "Id": "DATA_STRUCTURE"},
+            {"Severity": "LOGGER_SEVERITY_DEFAULT", "Id": "COMMUNICATION"},
+            {"Severity": "LOGGER_SEVERITY_DEFAULT", "Id": "FILE_TRANSFER"},
         ],
     },
     "StreamBufferSettings": {
         "StreamBufferCount": 3,
         "CtrlStreamBufferSizeInMB": 5,
-        "StreamBufferSizeInMB": 8
+        "StreamBufferSizeInMB": 8,
     },
     "ErrorBehavior": {
         "FailOnNoTablesCaptured": True,
@@ -129,13 +79,9 @@ DEFAULT_REPLICATE_TASK_SETTINGS = {
         "TableErrorEscalationCount": 0,
         "FullLoadIgnoreConflicts": True,
         "DataErrorPolicy": "LOG_ERROR",
-        "TableErrorPolicy": "SUSPEND_TABLE"
+        "TableErrorPolicy": "SUSPEND_TABLE",
     },
-    "TTSettings": {
-        "TTS3Settings": None,
-        "TTRecordSettings": None,
-        "EnableTT": False
-    },
+    "TTSettings": {"TTS3Settings": None, "TTRecordSettings": None, "EnableTT": False},
     "FullLoadSettings": {
         "CommitRate": 10000,
         "StopTaskCachedChangesApplied": False,
@@ -143,7 +89,7 @@ DEFAULT_REPLICATE_TASK_SETTINGS = {
         "MaxFullLoadSubTasks": 8,
         "TransactionConsistencyTimeout": 600,
         "CreatePkAfterFullLoad": False,
-        "TargetTablePrepMode": "DO_NOTHING"
+        "TargetTablePrepMode": "DO_NOTHING",
     },
     "ValidationSettings": {
         "ValidationPartialLobSize": 0,
@@ -162,7 +108,7 @@ DEFAULT_REPLICATE_TASK_SETTINGS = {
         "ThreadCount": 5,
         "RecordSuspendDelayInMinutes": 30,
         "ValidationS3Mask": 0,
-        "ValidationOnly": False
+        "ValidationOnly": False,
     },
     "TargetMetadata": {
         "ParallelApplyBufferSize": 0,
@@ -180,7 +126,7 @@ DEFAULT_REPLICATE_TASK_SETTINGS = {
         "FullLobMode": False,
         "LimitedSizeLobMode": True,
         "LoadMaxFileSize": 0,
-        "ParallelLoadBufferSize": 0
+        "ParallelLoadBufferSize": 0,
     },
     "BeforeImageSettings": None,
     "ControlTablesSettings": {
@@ -190,7 +136,7 @@ DEFAULT_REPLICATE_TASK_SETTINGS = {
         "SuspendedTablesTableEnabled": False,
         "HistoryTableEnabled": False,
         "ControlSchema": "",
-        "FullLoadExceptionTableEnabled": False
+        "FullLoadExceptionTableEnabled": False,
     },
     "LoopbackPreventionSettings": None,
     "CharacterSetSettings": None,
@@ -206,49 +152,45 @@ DEFAULT_REPLICATE_TASK_SETTINGS = {
         "MinTransactionSize": 1000,
         "MemoryKeepTime": 60,
         "BatchApplyMemoryLimit": 500,
-        "MemoryLimitTotal": 1024
+        "MemoryLimitTotal": 1024,
     },
     "ChangeProcessingDdlHandlingPolicy": {
         "HandleSourceTableDropped": True,
         "HandleSourceTableTruncated": True,
-        "HandleSourceTableAltered": True
+        "HandleSourceTableAltered": True,
     },
-    "PostProcessingRules": None
+    "PostProcessingRules": None,
 }
 
 DEFAULT_REPLICATE_TASK_SETTINGS_JSON = json.dumps(DEFAULT_REPLICATE_TASK_SETTINGS)
 
+
 class MigrationTask:
-    logger = get_logger('MigrationTask')
-    aws_client = boto3.client('dms')
+    logger = get_logger("MigrationTask")
+    aws_client = boto3.client("dms")
 
     def __init__(self, task_id: str):
         self.task_id = task_id
 
     def _describe(self) -> dict:
         response = self.aws_client.describe_replication_tasks(
-            Filters=[
-                {
-                    'Name': 'replication-task-id',
-                    'Values': [self.task_id]
-                }
-            ]
+            Filters=[{"Name": "replication-task-id", "Values": [self.task_id]}]
         )
-        if len(response['ReplicationTasks']) == 0:
-            raise ValueError(f'Replication task not found: {self.task_id}')
-        elif len(response['ReplicationTasks']) > 1:
-            raise ValueError(f'Multiple replication tasks found: {self.task_id}')
-        return response['ReplicationTasks'][0]
+        if len(response["ReplicationTasks"]) == 0:
+            raise ValueError(f"Replication task not found: {self.task_id}")
+        if len(response["ReplicationTasks"]) > 1:
+            raise ValueError(f"Multiple replication tasks found: {self.task_id}")
+        return response["ReplicationTasks"][0]
 
     def get_status(self) -> ReplicationTaskStatus:
-        return ReplicationTaskStatus(self._describe()['Status'])
+        return ReplicationTaskStatus(self._describe()["Status"])
 
     def _wait_until(
         self,
         expected_status: ReplicationTaskStatus,
         timeout: int = 4 * 60 * 60,
         pooling_frequency: int = 60,
-    ) -> 'MigrationTask':
+    ) -> "MigrationTask":
         """
         :param expected_status: ReplicationTaskStatus
         :param timeout: Timeout in seconds. Default is 4 hours
@@ -261,34 +203,37 @@ class MigrationTask:
             status = self.get_status()
             if status == expected_status:
                 return self
-            self.logger.debug(f'Task {self.task_id} is in status {status}, waiting...')
+            self.logger.debug("Task %s is in status %s, waiting...", self.task_id, status)
             time.sleep(pooling_frequency)
 
-        raise TimeoutError(f'Task {self.task_id} status is not {expected_status} after {timeout} seconds')
+        raise TimeoutError(f"Task {self.task_id} status is not {expected_status} after {timeout} seconds")
 
-    def wait_until_ready(self) -> 'MigrationTask':
+    def wait_until_ready(self) -> "MigrationTask":
         return self._wait_until(ReplicationTaskStatus.READY)
 
-    def wait_until_finished(self, timeout: int = 4 * 60 * 60, pooling_frequency: int = 2 * 60) -> 'MigrationTask':
+    def wait_until_finished(self, timeout: int = 4 * 60 * 60, pooling_frequency: int = 2 * 60) -> "MigrationTask":
         timeout_dt = datetime.now(tz=UTC) + timedelta(seconds=timeout)
 
         while datetime.now(tz=UTC) < timeout_dt:
             response = self._describe()
-            status = ReplicationTaskStatus(response['Status'])
-            stop_reason = response.get('StopReason')
-            last_failure_message = response.get('LastFailureMessage')
-            if status == ReplicationTaskStatus.STOPPED and stop_reason == 'Stop Reason NORMAL':
-                self.logger.info(f'[Task {self.task_id}] Task finished')
+            status = ReplicationTaskStatus(response["Status"])
+            stop_reason = response.get("StopReason")
+            last_failure_message = response.get("LastFailureMessage")
+            if status == ReplicationTaskStatus.STOPPED and stop_reason == "Stop Reason NORMAL":
+                self.logger.info("[Task %s] Task finished", self.task_id)
                 return self
-            elif status == ReplicationTaskStatus.STOPPED:
-                raise TaskFailedException(task=self, status=status, stop_reason=stop_reason, last_failure_message=last_failure_message)
-            elif status == ReplicationTaskStatus.FAILED:
-                raise TaskFailedException(task=self, status=status, stop_reason=stop_reason, last_failure_message=last_failure_message)
+            if status in (ReplicationTaskStatus.STOPPED, ReplicationTaskStatus.FAILED):
+                raise TaskFailedException(
+                    task=self,
+                    status=status,
+                    stop_reason=stop_reason,
+                    last_failure_message=last_failure_message,
+                )
 
-            self.logger.info(f'[Task {self.task_id}] Task status: {status}, waiting...')
+            self.logger.info("[Task %s] Task status: %s, waiting...", self.task_id, status)
             time.sleep(pooling_frequency)
 
-        raise TimeoutError(f'Task {self.task_id} status is not STOPPED after {timeout} seconds')
+        raise TimeoutError(f"Task {self.task_id} status is not STOPPED after {timeout} seconds")
 
     @classmethod
     def create_migration_task(
@@ -299,7 +244,7 @@ class MigrationTask:
         replication_instance: ReplicationInstance,
         migration_type: MigrationType,
         table_mappings: list[TableMapping],
-        tags: list[dict[str, str]] = None,
+        tags: list[dict[str, str]] = None,  # noqa: RUF013
     ):
         table_mappings_rules = {
             "rules": [
@@ -312,7 +257,7 @@ class MigrationTask:
                         "table-name": rule.table,
                     },
                     "rule-action": rule.action,
-                    "filters": []
+                    "filters": [],
                 }
                 for idx, rule in enumerate(table_mappings)
             ]
@@ -325,6 +270,6 @@ class MigrationTask:
             MigrationType=str(migration_type),
             TableMappings=json.dumps(table_mappings_rules),
             ReplicationTaskSettings=DEFAULT_REPLICATE_TASK_SETTINGS_JSON,
-            Tags=tags or []
-        )['ReplicationTask']
-        return cls(task_id=response['ReplicationTaskIdentifier'])
+            Tags=tags or [],
+        )["ReplicationTask"]
+        return cls(task_id=response["ReplicationTaskIdentifier"])

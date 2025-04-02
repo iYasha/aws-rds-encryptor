@@ -2,7 +2,7 @@ import abc
 
 import psycopg2
 
-from src.rds.instance import RDSInstance
+from rds_encryptor.rds.instance import RDSInstance
 
 
 class InvalidCredentialsException(Exception):
@@ -17,13 +17,13 @@ class DBManager(abc.ABC):
     invalid_credentials_exception: InvalidCredentialsException
 
     @staticmethod
-    def from_rds(rds_instance: RDSInstance, database: str = 'postgres') -> 'PostgresDBManager':
+    def from_rds(rds_instance: RDSInstance, database: str = "postgres") -> "PostgresDBManager":
         return PostgresDBManager(
             host=rds_instance.endpoint,
             port=rds_instance.port,
             user=rds_instance.master_username,
             password=rds_instance.master_password,
-            database=database
+            database=database,
         )
 
     @abc.abstractmethod
@@ -47,7 +47,7 @@ class PostgresDBManager:
             port=self.port,
             user=self.user,
             password=self.password,
-            database=self.database
+            database=self.database,
         )
 
     def check_connection(self) -> bool:
@@ -61,9 +61,7 @@ class PostgresDBManager:
             return False
         return True
 
-    @reconnect_on_failure(backoff=exponential_backoff())
     def get_parameter(self, parameter: str) -> str:
-        # TODO: catch exception in case db is restarting
         conn = self.__get_connection()
         cursor = conn.cursor()
         cursor.execute(f"SHOW {parameter}")
@@ -84,15 +82,16 @@ class PostgresDBManager:
         cursor = conn.cursor()
         cursor.execute(
             """
-            SELECT schema_name 
-            FROM information_schema.schemata 
-            WHERE schema_name NOT LIKE 'pg_%' 
+            SELECT schema_name
+            FROM information_schema.schemata
+            WHERE schema_name NOT LIKE 'pg_%'
               AND schema_name != 'information_schema'
         """
         )
         schemas = [row[0] for row in cursor.fetchall()]
         for schema in schemas:
-            cursor.execute(f"SELECT tablename FROM pg_tables WHERE schemaname = '{schema}'")
+            # FIXME: S608 Possible SQL injection vector through string-based query construction
+            cursor.execute(f"SELECT tablename FROM pg_tables WHERE schemaname = '{schema}'")  # noqa: S608
             tables = [row[0] for row in cursor.fetchall()]
             for table in tables:
                 cursor.execute(f"TRUNCATE TABLE {schema}.{table} CASCADE")
@@ -103,11 +102,14 @@ class PostgresDBManager:
         conn = self.__get_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT schemaname, sequencename, last_value FROM pg_sequences;")
-        sequences = [{
-            "schema": row[0],
-            "sequence": row[1],
-            "last_value": row[2] or 1,
-        } for row in cursor.fetchall()]
+        sequences = [
+            {
+                "schema": row[0],
+                "sequence": row[1],
+                "last_value": row[2] or 1,
+            }
+            for row in cursor.fetchall()
+        ]
         cursor.close()
         conn.close()
         return sequences
@@ -116,9 +118,6 @@ class PostgresDBManager:
         conn = self.__get_connection()
         cursor = conn.cursor()
         for sequence in sequences:
-            cursor.execute(
-                f"SELECT setval('{sequence['schema']}.{sequence['sequence']}', {sequence['last_value']})"
-            )
+            cursor.execute(f"SELECT setval('{sequence['schema']}.{sequence['sequence']}', {sequence['last_value']})")
         cursor.close()
         conn.close()
-

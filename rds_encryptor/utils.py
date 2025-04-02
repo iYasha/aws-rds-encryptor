@@ -2,12 +2,13 @@ import logging
 import os
 import sys
 import time
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 
-DEBUG = bool(int(os.getenv('DEBUG', '0')))
-MIGRATION_SEED = datetime.now(tz=UTC).strftime('%Y-%m-%d')
+DEBUG = bool(int(os.getenv("DEBUG", "0")))
+MIGRATION_SEED = datetime.now(tz=UTC).strftime("%Y-%m-%d")
 
-def get_logger(name: str = 'deploy', log_level: str = logging.INFO) -> logging.Logger:
+
+def get_logger(name: str = "deploy", log_level: str = logging.INFO) -> logging.Logger:
     if DEBUG:
         log_level = logging.DEBUG
     logger = logging.getLogger(name)
@@ -25,6 +26,6 @@ def get_logger(name: str = 'deploy', log_level: str = logging.INFO) -> logging.L
 def normalize_aws_id(db_name: str) -> str:
     """
     Identifiers must begin with a letter and must contain only ASCII letters, digits, and hyphens.
-    They can’t end with a hyphen, or contain two consecutive hyphens.
+    They can't end with a hyphen, or contain two consecutive hyphens.
     """
-    return ''.join(c for c in db_name.replace('_', '-') if c.isalnum() or c == '-').strip('-')
+    return "".join(c for c in db_name.replace("_", "-") if c.isalnum() or c == "-").strip("-")
