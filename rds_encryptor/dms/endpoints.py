@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal, Optional
 
 import boto3
+from botocore.exceptions import ClientError
 
 from rds_encryptor.rds.instance import RDSInstance
 from rds_encryptor.utils import MIGRATION_SEED, get_logger, normalize_aws_id
@@ -55,9 +56,14 @@ class BaseEndpoint(abc.ABC):
         return self
 
     def _describe(self):
-        response = self.aws_client.describe_endpoints(Filters=[{"Name": "endpoint-id", "Values": [self.endpoint_id]}])
-        if len(response["Endpoints"]) == 0:
-            return None
+        try:
+            response = self.aws_client.describe_endpoints(
+                Filters=[{"Name": "endpoint-id", "Values": [self.endpoint_id]}]
+            )
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "ResourceNotFoundFault":
+                return None
+            raise
         if len(response["Endpoints"]) > 1:
             raise ValueError(f"Multiple endpoints found: {self.endpoint_id}")
 

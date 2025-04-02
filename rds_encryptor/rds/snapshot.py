@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Optional
 
 import boto3
+from botocore.exceptions import ClientError
 
 from rds_encryptor.utils import get_logger
 
@@ -31,11 +32,14 @@ class RDSSnapshot:
     def from_id(cls, snapshot_id: str) -> Optional["RDSSnapshot"]:
         assert snapshot_id, "Snapshot ID is required"
 
-        snapshots = cls.aws_client.describe_db_snapshots(
-            DBSnapshotIdentifier=snapshot_id,
-        )["DBSnapshots"]
-        if len(snapshots) == 0:
-            return None
+        try:
+            snapshots = cls.aws_client.describe_db_snapshots(
+                DBSnapshotIdentifier=snapshot_id,
+            )["DBSnapshots"]
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "DBSnapshotNotFoundFault":
+                return None
+            raise
         if len(snapshots) > 1:
             raise ValueError(f"Multiple snapshots found: {snapshot_id}")
 

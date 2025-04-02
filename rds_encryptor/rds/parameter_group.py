@@ -1,6 +1,7 @@
 from typing import Optional
 
 import boto3
+from botocore.exceptions import ClientError
 
 from rds_encryptor.utils import MIGRATION_SEED, get_logger
 
@@ -25,11 +26,14 @@ class ParameterGroup:
     def from_name(cls, name: str) -> Optional["ParameterGroup"]:
         assert name, "Parameter group name is required"
 
-        response = cls.aws_client.describe_db_parameter_groups(
-            DBParameterGroupName=name,
-        )["DBParameterGroups"]
-        if len(response) == 0:
-            return None
+        try:
+            response = cls.aws_client.describe_db_parameter_groups(
+                DBParameterGroupName=name,
+            )["DBParameterGroups"]
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "DBParameterGroupNotFoundFault":
+                return None
+            raise
         if len(response) > 1:
             raise ValueError(f"Multiple parameter groups found: {name}")
 
@@ -49,8 +53,15 @@ class ParameterGroup:
     def _fetch_properties(self):
         response = self.aws_client.describe_db_parameters(
             DBParameterGroupName=self.name,
-        )["Parameters"]
-        return {param["ParameterName"]: param["ParameterValue"] for param in response}
+        )
+        parameters = response.get("Parameters", [])
+        while response.get("Marker"):
+            response = self.aws_client.describe_db_parameters(
+                DBParameterGroupName=self.name,
+                Marker=response["Marker"],
+            )
+            parameters.extend(response.get("Parameters", []))
+        return {param["ParameterName"]: param["ParameterValue"] for param in parameters if "ParameterValue" in param}
 
     @property
     def wal_sender_timeout(self) -> int:

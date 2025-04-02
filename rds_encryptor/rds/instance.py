@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Optional
 
 import boto3
+from botocore.exceptions import ClientError
 
 from rds_encryptor.rds.parameter_group import ParameterGroup
 from rds_encryptor.rds.snapshot import RDSSnapshot
@@ -38,11 +39,14 @@ class RDSInstance:
         assert instance_id, "Instance ID is required"
         assert root_password, "Root password is required"
 
-        instances = cls.aws_client.describe_db_instances(
-            DBInstanceIdentifier=instance_id,
-        )["DBInstances"]
-        if len(instances) == 0:
-            return None
+        try:
+            instances = cls.aws_client.describe_db_instances(
+                DBInstanceIdentifier=instance_id,
+            )["DBInstances"]
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "DBInstanceNotFound":
+                return None
+            raise
         if len(instances) > 1:
             raise ValueError(f"Multiple instances found: {instance_id}")
 
@@ -111,12 +115,3 @@ class RDSInstance:
             time.sleep(pooling_frequency)
 
         raise TimeoutError(f"Instance {self.instance_id} is not available after {timeout} seconds")
-
-
-if __name__ == "__main__":
-    import os
-
-    rds_instance = RDSInstance.from_id(
-        instance_id=os.getenv("PRIMARY_INSTANCE_IDENTIFIER"),
-        root_password=os.getenv("PRIMARY_INSTANCE_PASSWORD"),
-    )
