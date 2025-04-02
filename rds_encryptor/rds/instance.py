@@ -115,6 +115,7 @@ class RDSInstance:
             ApplyImmediately=True,
         )
         self.parameter_group = parameter_group
+        time.sleep(20)  # Wait for the parameter group to be applied
         self.logger.info(
             'Parameter group "%s" set for "%s" instance',
             parameter_group.name,

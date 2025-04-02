@@ -1,4 +1,5 @@
 import abc
+from collections.abc import Generator
 
 import psycopg2
 
@@ -74,9 +75,27 @@ class PostgresDBManager:
         conn = self.__get_connection()
         cursor = conn.cursor()
         cursor.execute(f"CREATE EXTENSION IF NOT EXISTS {extension}")
-        cursor.commit()
+        conn.commit()
         cursor.close()
         conn.close()
+
+    def get_all_tables(self) -> list[str]:
+        conn = self.__get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT schemaname, tablename
+            FROM pg_catalog.pg_tables
+            WHERE schemaname NOT LIKE 'pg_%'
+              AND schemaname != 'information_schema'
+              and tablename not like 'awsdms_ddl_audit%'
+            ORDER BY schemaname, tablename;
+            """
+        )
+        tables = [f"{row[0]}.{row[1]}" for row in cursor.fetchall()]
+        cursor.close()
+        conn.close()
+        return tables
 
     def truncate_database(self):
         conn = self.__get_connection()
@@ -85,8 +104,8 @@ class PostgresDBManager:
             """
             SELECT schema_name
             FROM information_schema.schemata
-            WHERE schema_name NOT LIKE 'pg_%'
-              AND schema_name != 'information_schema'
+            WHERE (schema_name NOT LIKE 'pg_%'
+              AND schema_name != 'information_schema') or schema_name = 'pglogical';
         """
         )
         schemas = [row[0] for row in cursor.fetchall()]
@@ -96,7 +115,7 @@ class PostgresDBManager:
             tables = [row[0] for row in cursor.fetchall()]
             for table in tables:
                 cursor.execute(f"TRUNCATE TABLE {schema}.{table} CASCADE")
-        cursor.commit()
+        conn.commit()
         cursor.close()
         conn.close()
 
@@ -120,7 +139,18 @@ class PostgresDBManager:
         conn = self.__get_connection()
         cursor = conn.cursor()
         for sequence in sequences:
+            if sequence["sequence"].startswith("awsdms_ddl_audit"):
+                continue
             cursor.execute(f"SELECT setval('{sequence['schema']}.{sequence['sequence']}', {sequence['last_value']})")
-        cursor.commit()
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+    def iter_count(self, tables: list[str]) -> Generator[int, None, None]:
+        conn = self.__get_connection()
+        cursor = conn.cursor()
+        for table in tables:
+            cursor.execute(f"SELECT COUNT(*) FROM {table}")  # noqa: S608
+            yield cursor.fetchone()[0]
         cursor.close()
         conn.close()

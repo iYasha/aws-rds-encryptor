@@ -11,7 +11,14 @@ def build_shared_preload_libraries_param(*libraries: str) -> str:
 
 
 def get_migration_parameter_group_name(parameter_group_name: str) -> str:
-    return f"{parameter_group_name}-{MIGRATION_SEED}-migration"
+    salt = f"-{MIGRATION_SEED}-migration"
+    if parameter_group_name.endswith(salt):
+        return parameter_group_name
+    return f"{parameter_group_name}{salt}"
+
+
+def get_original_parameter_group(migration_parameter_group_name) -> str:
+    return migration_parameter_group_name.replace(f"-{MIGRATION_SEED}-migration", "")
 
 
 class ParameterGroup:
@@ -96,3 +103,10 @@ class ParameterGroup:
             Parameters=[parameter],
         )
         self.properties = self._fetch_properties()
+
+    def delete(self) -> None:
+        self.logger.info('Deleting parameter group "%s" ...', self.name)
+        self.aws_client.delete_db_parameter_group(
+            DBParameterGroupName=self.name,
+        )
+        self.logger.info('Parameter group "%s" deleted', self.name)

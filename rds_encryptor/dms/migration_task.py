@@ -121,7 +121,7 @@ DEFAULT_REPLICATE_TASK_SETTINGS = {
         "LobChunkSize": 0,
         "TaskRecoveryTableEnabled": False,
         "ParallelLoadThreads": 0,
-        "LobMaxSize": 32,
+        "LobMaxSize": 100_000,  # TODO: Might be issue if your LOB e.g. JSONB field is larger than 100MB
         "BatchApplyEnabled": False,
         "FullLobMode": False,
         "LimitedSizeLobMode": True,
@@ -230,8 +230,12 @@ class MigrationTask:
             status = ReplicationTaskStatus(response["Status"])
             stop_reason = response.get("StopReason")
             last_failure_message = response.get("LastFailureMessage")
+            full_load_progress = response.get("ReplicationTaskStats", {}).get("FullLoadProgressPercent", 0)
             if status == ReplicationTaskStatus.STOPPED and stop_reason == "Stop Reason NORMAL":
                 self.logger.info("[Task %s] Task finished", self.task_id)
+                return self
+            if status == ReplicationTaskStatus.RUNNING and full_load_progress == 100:
+                self.logger.info("[Task %s] Full load completed", self.task_id)
                 return self
             if status in (ReplicationTaskStatus.STOPPED, ReplicationTaskStatus.FAILED):
                 raise TaskFailedException(
@@ -241,7 +245,12 @@ class MigrationTask:
                     last_failure_message=last_failure_message,
                 )
 
-            self.logger.info("[Task %s] Task status: %s, waiting...", self.task_id, status)
+            self.logger.info(
+                "[Task %s] Task status: %s, full load progress %s/100 waiting...",
+                self.task_id,
+                status,
+                full_load_progress,
+            )
             time.sleep(pooling_frequency)
 
         raise TimeoutError(f"Task {self.task_id} status is not STOPPED after {timeout} seconds")

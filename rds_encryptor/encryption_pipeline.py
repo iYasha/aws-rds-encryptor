@@ -9,6 +9,7 @@ from rds_encryptor.rds.parameter_group import (
     ParameterGroup,
     build_shared_preload_libraries_param,
     get_migration_parameter_group_name,
+    get_original_parameter_group,
 )
 from rds_encryptor.utils import MIGRATION_SEED, get_logger, normalize_aws_id
 
@@ -153,7 +154,12 @@ class EncryptionPipeline:
                 target_endpoint=target_endpoint,
                 replication_instance=dms_replication_instance,
                 migration_type=MigrationType.migrate_replicate,
-                table_mappings=[TableMapping(schema="%", table="%", action="include")],
+                table_mappings=[
+                    TableMapping(schema="%", table="%", action="include"),
+                    TableMapping(schema="pg_%", table="%", action="exclude"),
+                    TableMapping(schema="information_schema", table="%", action="exclude"),
+                    TableMapping(schema="pglogical", table="%", action="exclude"),
+                ],
                 tags=self.rds_instance.tags,
             )
 
@@ -187,6 +193,69 @@ class EncryptionPipeline:
                 encrypted_rds_instance.instance_id,
             )
 
+    def check_data_consistency(self, encrypted_rds_instance: RDSInstance):
+        for database in self.databases:
+            source_db_manager = DBManager.from_rds(rds_instance=self.rds_instance, database=database)
+            target_db_manager = DBManager.from_rds(rds_instance=encrypted_rds_instance, database=database)
+            self.logger.info(
+                'Checking data consistency for "%s" database between "%s" and "%s" instances...',
+                database,
+                self.rds_instance.instance_id,
+                encrypted_rds_instance.instance_id,
+            )
+            tables = source_db_manager.get_all_tables()
+
+            iterator = zip(
+                tables, source_db_manager.iter_count(tables), target_db_manager.iter_count(tables), strict=True
+            )
+
+            diff_count = {}
+
+            for table, source_count, target_count in iterator:
+                if source_count != target_count:
+                    diff_count[table] = (source_count, target_count)
+                    self.logger.error(
+                        'Data inconsistency for table "%s" between "%s" and "%s" instances: '
+                        "source count=%s, target count=%s",
+                        table,
+                        self.rds_instance.instance_id,
+                        encrypted_rds_instance.instance_id,
+                        source_count,
+                        target_count,
+                    )
+
+            if not diff_count:
+                self.logger.info(
+                    'Data consistency check for "%s" database between "%s" and "%s" instances passed',
+                    database,
+                    self.rds_instance.instance_id,
+                    encrypted_rds_instance.instance_id,
+                )
+            else:
+                self.logger.error(
+                    'Data consistency check for "%s" database between "%s" and "%s" instances failed',
+                    database,
+                    self.rds_instance.instance_id,
+                    encrypted_rds_instance.instance_id,
+                )
+
+    def rollback_parameter_group(self, encrypted_rds_instance: RDSInstance):
+        # TODO: DEPRECATED
+        original_parameter_group_name = get_original_parameter_group(self.rds_instance.parameter_group.name)
+        parameter_group: ParameterGroup | None = ParameterGroup.from_name(name=original_parameter_group_name)
+        if parameter_group is None:
+            self.logger.warning('Cannot find original parameter group "%s" for rollback', original_parameter_group_name)
+            return
+        migration_parameter_group = self.rds_instance.parameter_group
+        self.rds_instance.set_parameter_group(parameter_group).wait_until_available()
+        encrypted_rds_instance.set_parameter_group(parameter_group).wait_until_available()
+        input(f'Please reboot "{self.rds_instance.instance_id}" database and hit <Enter>')
+        self.rds_instance.wait_until_available()
+        input(f'Please reboot "{encrypted_rds_instance.instance_id}" database and hit <Enter>')
+        encrypted_rds_instance.wait_until_available()
+        migration_parameter_group.delete()
+        self.logger.info('Rollback to "%s" parameter group finished', original_parameter_group_name)
+
     def run_pipeline(self):
         self.check_databases_connections()
         encrypted_rds_instance = self.create_encrypted_instance()
@@ -197,10 +266,14 @@ class EncryptionPipeline:
             self.rds_instance.wait_until_available().set_parameter_group(
                 migration_parameter_group
             ).wait_until_available()
+            input(f'Please reboot "{self.rds_instance.instance_id}" database and hit <Enter>')
+            self.rds_instance.wait_until_available()
         if encrypted_rds_instance.parameter_group.name != migration_parameter_group.name:
             encrypted_rds_instance.wait_until_available().set_parameter_group(
                 migration_parameter_group
             ).wait_until_available()
+            input(f'Please reboot "{encrypted_rds_instance.instance_id}" database and hit <Enter>')
+            encrypted_rds_instance.wait_until_available()
         self.create_pglogical_extension_in_source_db()
 
         task_manager = self.create_replication_tasks(encrypted_rds_instance)
@@ -208,5 +281,6 @@ class EncryptionPipeline:
         if task_manager.run_all():
             self.logger.info("All tasks finished successfully.")
             self.migrate_databases_sequences(encrypted_rds_instance)
+            self.check_data_consistency(encrypted_rds_instance)
         else:
             self.logger.warning("One or more tasks finished with errors.")

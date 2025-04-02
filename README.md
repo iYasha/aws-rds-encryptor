@@ -20,6 +20,9 @@ RDS Encryptor is a CLI tool that automates the encryption of Amazon RDS instance
 pip install rds-encryptor
 ```
 
+## Requirements
+- Created dms replication instance and kms key before running the tool. [How to choose correct replication instance class?](https://docs.aws.amazon.com/dms/latest/userguide/CHAP_BestPractices.SizingReplicationInstance.html)
+
 ## Usage
 Run the tool using the CLI:
 ```sh
