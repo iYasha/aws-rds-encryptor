@@ -61,7 +61,7 @@ class BaseEndpoint(abc.ABC):
                 Filters=[{"Name": "endpoint-id", "Values": [self.endpoint_id]}]
             )
         except ClientError as e:
-            if e.response["Error"]["Code"] == "ResourceNotFoundFault":
+            if e.response["Error"]["Code"] == "ResourceNotFound":
                 return None
             raise
         if len(response["Endpoints"]) > 1:

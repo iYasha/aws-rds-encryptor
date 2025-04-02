@@ -31,7 +31,7 @@ class ParameterGroup:
                 DBParameterGroupName=name,
             )["DBParameterGroups"]
         except ClientError as e:
-            if e.response["Error"]["Code"] == "DBParameterGroupNotFoundFault":
+            if e.response["Error"]["Code"] == "DBParameterGroupNotFound":
                 return None
             raise
         if len(response) > 1:

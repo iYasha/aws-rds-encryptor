@@ -37,7 +37,7 @@ class RDSSnapshot:
                 DBSnapshotIdentifier=snapshot_id,
             )["DBSnapshots"]
         except ClientError as e:
-            if e.response["Error"]["Code"] == "DBSnapshotNotFoundFault":
+            if e.response["Error"]["Code"] == "DBSnapshotNotFound":
                 return None
             raise
         if len(snapshots) > 1:
