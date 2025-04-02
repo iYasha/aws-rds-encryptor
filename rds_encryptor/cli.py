@@ -3,7 +3,7 @@ import argparse
 from rds_encryptor.encryption_pipeline import EncryptionPipeline
 
 
-def cli_run():
+def main():
     parser = argparse.ArgumentParser(description="Encrypt RDS instance")
     parser.add_argument("--rds-instance-name", "-r", type=str, required=True, help="RDS instance ID")
     parser.add_argument(
@@ -55,4 +55,4 @@ def cli_run():
 
 
 if __name__ == "__main__":
-    cli_run()
+    main()

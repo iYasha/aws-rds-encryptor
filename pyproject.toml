@@ -34,6 +34,9 @@ dependencies = [
     "boto3>=1.37.23",
 ]
 
+[project.scripts]
+rds-encryptor = "rds_encryptor.cli:main"
+
 [project.optional-dependencies]
 docs = ["sphinx>=7"]
 
