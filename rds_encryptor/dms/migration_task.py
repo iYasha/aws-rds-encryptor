@@ -169,8 +169,9 @@ class MigrationTask:
     logger = get_logger("MigrationTask")
     aws_client = boto3.client("dms")
 
-    def __init__(self, task_id: str):
+    def __init__(self, task_id: str, arn: str):
         self.task_id = task_id
+        self.arn = arn
 
     def _describe(self) -> dict:
         response = self.aws_client.describe_replication_tasks(
@@ -213,6 +214,14 @@ class MigrationTask:
         self.logger.info("Waiting for task %s to be ready ...", self.task_id)
         return self._wait_until(ReplicationTaskStatus.READY)
 
+    def run_task(self) -> "MigrationTask":
+        self.logger.info("Starting task %s ...", self.task_id)
+        self.aws_client.start_replication_task(
+            ReplicationTaskArn=self.arn, StartReplicationTaskType="start-replication"
+        )
+        self.logger.info("Task %s started", self.task_id)
+        return self
+
     def wait_until_finished(self, timeout: int = 4 * 60 * 60, pooling_frequency: int = 2 * 60) -> "MigrationTask":
         timeout_dt = datetime.now(tz=UTC) + timedelta(seconds=timeout)
 
@@ -248,6 +257,7 @@ class MigrationTask:
         table_mappings: list[TableMapping],
         tags: list[dict[str, str]] = None,  # noqa: RUF013
     ):
+        # TODO: Add check if the task already exists
         table_mappings_rules = {
             "rules": [
                 {
@@ -285,5 +295,7 @@ class MigrationTask:
             ReplicationTaskSettings=DEFAULT_REPLICATE_TASK_SETTINGS_JSON,
             Tags=tags or [],
         )["ReplicationTask"]
+        # Replication Task is modifying the replication instance, so we need to wait until it's active
+        replication_instance.wait_until_active()
         cls.logger.info('Migration task "%s" created', normalized_id)
-        return cls(task_id=response["ReplicationTaskIdentifier"])
+        return cls(task_id=response["ReplicationTaskIdentifier"], arn=response["ReplicationTaskArn"])

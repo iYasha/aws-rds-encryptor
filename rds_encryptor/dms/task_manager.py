@@ -17,7 +17,7 @@ class MigrationTaskManager:
     def run_task(self, task: "MigrationTask"):
         try:
             self.logger.info('Starting database migration task "%s" ...', task.task_id)
-            task.wait_until_finished()
+            task.wait_until_ready().run_task().wait_until_finished()
             self.logger.info('Database migration task "%s" finished successfully', task.task_id)
         except TaskFailedException as e:
             self.errors.append(e)

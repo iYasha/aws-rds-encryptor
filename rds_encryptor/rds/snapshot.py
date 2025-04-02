@@ -74,7 +74,7 @@ class RDSSnapshot:
         self.logger.info('Snapshot "%s" is being copied', target_snapshot_id)
         return RDSSnapshot.from_id(response["DBSnapshot"]["DBSnapshotIdentifier"])
 
-    def wait_until_created(self, timeout: int = 60 * 60, pooling_frequency: int = 30) -> "RDSSnapshot":
+    def wait_until_created(self, timeout: int = 60 * 60, pooling_frequency: int = 60) -> "RDSSnapshot":
         self.logger.info('Waiting for snapshot "%s" to become available ...', self.snapshot_id)
         timeout_dt = datetime.now(tz=UTC) + timedelta(seconds=timeout)
 
@@ -89,15 +89,30 @@ class RDSSnapshot:
 
         raise TimeoutError(f"Snapshot {self.snapshot_id} creation timeout after {timeout} seconds")
 
-    def restore_snapshot(self, instance_identifier: str, tags: list[dict[str, str]] = None) -> "RDSInstance":  # noqa: RUF013
+    def restore_snapshot(
+        self,
+        instance_identifier: str,
+        from_rds_instance: "RDSInstance",
+        master_password: str,
+        tags: list[dict[str, str]] = None,  # noqa: RUF013
+    ) -> "RDSInstance":
         from rds_encryptor.rds.instance import RDSInstance
+
+        old_instance = from_rds_instance._describe()
 
         tags = tags or []
         self.logger.info('Restoring snapshot "%s" to instance "%s" ...', self.snapshot_id, instance_identifier)
         response = self.aws_client.restore_db_instance_from_db_snapshot(
             DBInstanceIdentifier=instance_identifier,
             DBSnapshotIdentifier=self.snapshot_id,
+            PubliclyAccessible=old_instance["PubliclyAccessible"],
+            DBSubnetGroupName=old_instance["DBSubnetGroup"]["DBSubnetGroupName"],
+            VpcSecurityGroupIds=[sg["VpcSecurityGroupId"] for sg in old_instance["VpcSecurityGroups"]],
+            CopyTagsToSnapshot=old_instance["CopyTagsToSnapshot"],
             Tags=tags,
+            AvailabilityZone=old_instance["AvailabilityZone"],
         )
         self.logger.info('Instance "%s" is being restored', instance_identifier)
-        return RDSInstance.from_id(instance_id=response["DBInstance"]["DBInstanceIdentifier"])
+        return RDSInstance.from_id(
+            instance_id=response["DBInstance"]["DBInstanceIdentifier"], root_password=master_password
+        )

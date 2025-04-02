@@ -61,29 +61,38 @@ class ParameterGroup:
                 Marker=response["Marker"],
             )
             parameters.extend(response.get("Parameters", []))
-        return {param["ParameterName"]: param["ParameterValue"] for param in parameters if "ParameterValue" in param}
+        return {
+            param["ParameterName"]: {"value": param["ParameterValue"], "apply_type": param["ApplyType"]}
+            for param in parameters
+            if "ParameterValue" in param
+        }
 
     @property
     def wal_sender_timeout(self) -> int:
-        return int(self.properties.get("wal_sender_timeout", 0))
+        return int(self.properties.get("wal_sender_timeout", {"value": 0})["value"])
 
     @property
     def shared_preload_libraries(self) -> list[str]:
         return list(
             map(
                 str.strip,
-                self.properties.get("shared_preload_libraries", "").split(","),
+                self.properties.get("shared_preload_libraries", {"value": ""})["value"].split(","),
             )
         )
 
     @property
     def rds_logical_replication(self) -> int:
-        return int(self.properties.get("rds.logical_replication", 0))
+        return int(self.properties.get("rds.logical_replication", {"value": 0})["value"])
 
     def set_parameter(self, name: str, value: any) -> None:
+        parameter = {"ParameterName": name, "ParameterValue": str(value)}
+        old_parameter = self.properties.get(name)
+        if old_parameter is not None and old_parameter["apply_type"] != "static":
+            parameter["ApplyMethod"] = "immediate"
+        else:
+            parameter["ApplyMethod"] = "pending-reboot"
         self.aws_client.modify_db_parameter_group(
             DBParameterGroupName=self.name,
-            Parameters=[{"ParameterName": name, "ParameterValue": str(value)}],
-            ApplyMethod="immediate",
+            Parameters=[parameter],
         )
         self.properties = self._fetch_properties()

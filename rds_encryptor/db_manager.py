@@ -74,6 +74,7 @@ class PostgresDBManager:
         conn = self.__get_connection()
         cursor = conn.cursor()
         cursor.execute(f"CREATE EXTENSION IF NOT EXISTS {extension}")
+        cursor.commit()
         cursor.close()
         conn.close()
 
@@ -95,6 +96,7 @@ class PostgresDBManager:
             tables = [row[0] for row in cursor.fetchall()]
             for table in tables:
                 cursor.execute(f"TRUNCATE TABLE {schema}.{table} CASCADE")
+        cursor.commit()
         cursor.close()
         conn.close()
 
@@ -119,5 +121,6 @@ class PostgresDBManager:
         cursor = conn.cursor()
         for sequence in sequences:
             cursor.execute(f"SELECT setval('{sequence['schema']}.{sequence['sequence']}', {sequence['last_value']})")
+        cursor.commit()
         cursor.close()
         conn.close()

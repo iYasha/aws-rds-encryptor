@@ -56,14 +56,7 @@ class BaseEndpoint(abc.ABC):
         return self
 
     def _describe(self):
-        try:
-            response = self.aws_client.describe_endpoints(
-                Filters=[{"Name": "endpoint-id", "Values": [self.endpoint_id]}]
-            )
-        except ClientError as e:
-            if e.response["Error"]["Code"] == "ResourceNotFound":
-                return None
-            raise
+        response = self.aws_client.describe_endpoints(Filters=[{"Name": "endpoint-id", "Values": [self.endpoint_id]}])
         if len(response["Endpoints"]) > 1:
             raise ValueError(f"Multiple endpoints found: {self.endpoint_id}")
 
@@ -73,7 +66,12 @@ class BaseEndpoint(abc.ABC):
         return self._describe()["Status"]
 
     def get_endpoint(self) -> Optional["BaseEndpoint"]:
-        self._arn = self._describe()["EndpointArn"]
+        try:
+            self._arn = self._describe()["EndpointArn"]
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "ResourceNotFoundFault":
+                return None
+            raise
         return self
 
     def get_or_create_endpoint(self) -> "BaseEndpoint":
@@ -81,7 +79,7 @@ class BaseEndpoint(abc.ABC):
             'Creating %s endpoint "%s" for "%s" database', self.endpoint_type, self.endpoint_id, self.database
         )
         endpoint = self.get_endpoint()
-        if endpoint is not None:
+        if self._arn is not None:
             self.logger.info('Endpoint "%s" already exists', self.endpoint_id)
             return endpoint
         return self.create_endpoint()

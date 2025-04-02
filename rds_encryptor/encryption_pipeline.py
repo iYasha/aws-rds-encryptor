@@ -58,7 +58,18 @@ class EncryptionPipeline:
             ).wait_until_created()
             encrypted_rds_instance = encrypted_snapshot.restore_snapshot(
                 instance_identifier=self.new_instance_identifier,
+                from_rds_instance=self.rds_instance,
+                master_password=self.rds_instance.master_password,
                 tags=self.rds_instance.tags,
+            ).wait_until_available()
+
+            rds_instance_params = self.rds_instance._describe()
+            encrypted_rds_instance.modify_instance(
+                DBSecurityGroups=rds_instance_params["DBSecurityGroups"],
+                DatabaseInsightsMode=rds_instance_params["DatabaseInsightsMode"],
+                EnablePerformanceInsights=rds_instance_params["PerformanceInsightsEnabled"],
+                PerformanceInsightsKMSKeyId=self.kms_key_arn,
+                MaxAllocatedStorage=rds_instance_params["MaxAllocatedStorage"],
             ).wait_until_available()
         else:
             self.logger.info(
@@ -144,7 +155,8 @@ class EncryptionPipeline:
                 migration_type=MigrationType.migrate_replicate,
                 table_mappings=[TableMapping(schema="%", table="%", action="include")],
                 tags=self.rds_instance.tags,
-            ).wait_until_ready()
+            )
+
             self.logger.info(
                 'Truncating tables in "%s" database for instance "%s" ...', database, encrypted_rds_instance.instance_id
             )
@@ -182,9 +194,13 @@ class EncryptionPipeline:
 
         # TODO: Need to set previous parameter group after migration
         if self.rds_instance.parameter_group.name != migration_parameter_group.name:
-            self.rds_instance.set_parameter_group(migration_parameter_group).wait_until_available()
+            self.rds_instance.wait_until_available().set_parameter_group(
+                migration_parameter_group
+            ).wait_until_available()
         if encrypted_rds_instance.parameter_group.name != migration_parameter_group.name:
-            encrypted_rds_instance.set_parameter_group(migration_parameter_group).wait_until_available()
+            encrypted_rds_instance.wait_until_available().set_parameter_group(
+                migration_parameter_group
+            ).wait_until_available()
         self.create_pglogical_extension_in_source_db()
 
         task_manager = self.create_replication_tasks(encrypted_rds_instance)
