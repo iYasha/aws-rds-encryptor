@@ -41,6 +41,8 @@ class BaseEndpoint(abc.ABC):
             EndpointType=self.endpoint_type,
             EngineName="postgres",
             KmsKeyId=self.kms_key_arn,
+            # For PostgreSQL 15 and later, SSL mode is required and enabled by default
+            SslMode="require" if self.rds_instance.get_engine_version()[0] >= 15 else "none",
             PostgreSQLSettings={
                 "DatabaseName": self.database,
                 "Port": self.rds_instance.port,

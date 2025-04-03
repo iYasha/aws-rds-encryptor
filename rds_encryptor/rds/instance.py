@@ -54,6 +54,10 @@ class RDSInstance:
             raise ValueError(f"Multiple instances found: {self.instance_id}")
         return instances[0]
 
+    def get_engine_version(self) -> tuple[int, ...]:
+        instance = self._describe()
+        return tuple(map(int, instance.get("EngineVersion", "0.0").split(".")))
+
     @classmethod
     def from_id(cls, instance_id: str, root_password: str) -> Optional["RDSInstance"]:
         assert instance_id, "Instance ID is required"
