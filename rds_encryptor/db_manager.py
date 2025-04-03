@@ -79,6 +79,26 @@ class PostgresDBManager:
         cursor.close()
         conn.close()
 
+    def get_partitioned_tables(self) -> list[dict[str, str]]:
+        query = """
+        select relnamespace::regnamespace::text schema_name, oid::regclass::text table_name from pg_class
+        where relkind = 'p' and oid in (select distinct inhparent from pg_inherits)
+        order by schema_name, table_name;
+        """
+        conn = self.__get_connection()
+        cursor = conn.cursor()
+        cursor.execute(query)
+        tables = [
+            {
+                "schema": row[0],
+                "table": row[1],
+            }
+            for row in cursor.fetchall()
+        ]
+        cursor.close()
+        conn.close()
+        return tables
+
     def get_all_tables(self) -> list[str]:
         conn = self.__get_connection()
         cursor = conn.cursor()

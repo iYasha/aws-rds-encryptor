@@ -134,6 +134,16 @@ class EncryptionPipeline:
         dms_replication_instance = ReplicationInstance.from_arn(arn=self.dms_replication_instance_arn)
 
         for database in self.databases:
+            encrypted_instance_db_manager = DBManager.from_rds(rds_instance=encrypted_rds_instance, database=database)
+
+            # Because of the wildcards DMS trying to migrate partitioned tables and partitions as regular tables,
+            # we get unique constraint violation, to prevent it we have to exclude partitioned tables
+            partitioned_tables = encrypted_instance_db_manager.get_partitioned_tables()
+            exclude_partitioned_tables = [
+                TableMapping(schema=table["schema"], table=table["table"], action="exclude")
+                for table in partitioned_tables
+            ]
+
             source_endpoint = (
                 SourceEndpoint(self.rds_instance, database=database, kms_key_arn=self.kms_key_arn)
                 .get_or_create_endpoint()
@@ -159,6 +169,7 @@ class EncryptionPipeline:
                     TableMapping(schema="pg_%", table="%", action="exclude"),
                     TableMapping(schema="information_schema", table="%", action="exclude"),
                     TableMapping(schema="pglogical", table="%", action="exclude"),
+                    *exclude_partitioned_tables,
                 ],
                 tags=self.rds_instance.tags,
             )
@@ -166,7 +177,7 @@ class EncryptionPipeline:
             self.logger.info(
                 'Truncating tables in "%s" database for instance "%s" ...', database, encrypted_rds_instance.instance_id
             )
-            DBManager.from_rds(rds_instance=encrypted_rds_instance, database=database).truncate_database()
+            encrypted_instance_db_manager.truncate_database()
             self.logger.info(
                 'Tables truncated in "%s" database for instance "%s"', database, encrypted_rds_instance.instance_id
             )
