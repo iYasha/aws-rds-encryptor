@@ -91,7 +91,7 @@ class PostgresDBManager:
         tables = [
             {
                 "schema": row[0],
-                "table": row[1],
+                "table": row[1].replace(f"{row[0]}.", "") if row[1].startswith(f"{row[0]}.") else row[1],
             }
             for row in cursor.fetchall()
         ]
